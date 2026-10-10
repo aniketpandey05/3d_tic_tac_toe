@@ -7,7 +7,7 @@ export default function App() {
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
       <Game>
-        {({ board, handleMove, winnerInfo, activeLayer }) => (
+        {({ board, handleMove, winnerInfo, activeLayer, playerSymbol, currentTurn }) => (
 <Canvas
   camera={{ position: [5, 5, 5], fov: 50 }}
   style={{ position: "absolute", inset: 0 }}
@@ -20,6 +20,8 @@ export default function App() {
               onCellClick={handleMove}
               winnerInfo={winnerInfo}
               activeLayer={activeLayer}
+              playerSymbol={playerSymbol}
+              currentTurn={currentTurn}
             />
 
             <OrbitControls enablePan={false} enableDamping />

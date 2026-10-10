@@ -101,7 +101,9 @@ io.on("connection", (socket) => {
       rooms[roomId] = {
         board: Array(27).fill(null),
         playerTurn: "X",
-        players: [],
+        // Fixed seats: index 0 = X, index 1 = O, null = empty seat.
+        // Seats are never shifted, so a player keeps their symbol if the other leaves.
+        players: [null, null],
         spectators: [],
         winner: null,
         scores: { X: 0, O: 0, draws: 0 }
@@ -112,8 +114,9 @@ io.on("connection", (socket) => {
 
     if (!room.players.includes(socket.id) && (!room.spectators || !room.spectators.includes(socket.id))) {
       room.spectators = room.spectators || [];
-      if (!asSpectator && room.players.length < 2) {
-        room.players.push(socket.id);
+      const freeSeat = room.players.indexOf(null);
+      if (!asSpectator && freeSeat !== -1) {
+        room.players[freeSeat] = socket.id;
       } else if (asSpectator) {
         room.spectators.push(socket.id);
       } else {
@@ -134,7 +137,7 @@ io.on("connection", (socket) => {
     socket.emit("player-assigned", role);
     io.to(roomId).emit("state-update", room);
 
-    const otherUsers = [...room.players, ...(room.spectators || [])].filter((id) => id !== socket.id);
+    const otherUsers = [...room.players, ...(room.spectators || [])].filter((id) => id && id !== socket.id);
 
     // Send list of existing users to the new user
     socket.emit("all-users", otherUsers);
@@ -146,6 +149,9 @@ io.on("connection", (socket) => {
   socket.on("make-move", ({ roomId, index }) => {
     const room = rooms[roomId];
     if (!room) return;
+
+    // Reject anything that isn't a real cell index (0–26)
+    if (!Number.isInteger(index) || index < 0 || index >= room.board.length) return;
 
     const playerIndex = room.players.indexOf(socket.id);
     if (playerIndex === -1) {
@@ -209,13 +215,14 @@ io.on("connection", (socket) => {
       const hasSpectators = room.spectators && room.spectators.includes(socket.id);
 
       if (hasPlayers || hasSpectators) {
-        room.players = room.players.filter(id => id !== socket.id);
+        // Free the seat instead of removing it, so the remaining player keeps their symbol
+        room.players = room.players.map(id => (id === socket.id ? null : id));
         if (room.spectators) {
           room.spectators = room.spectators.filter(id => id !== socket.id);
         }
         socket.to(roomId).emit("user-disconnected", socket.id);
 
-        if (room.players.length === 0 && (!room.spectators || room.spectators.length === 0)) {
+        if (room.players.every(id => id === null) && (!room.spectators || room.spectators.length === 0)) {
           delete rooms[roomId];
         } else {
           io.to(roomId).emit("state-update", room);

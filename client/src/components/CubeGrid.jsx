@@ -23,7 +23,8 @@ export default function CubeGrid({
       for (let z = 0; z < 3; z++) {
         const index = x * 9 + y * 3 + z;
         const value = board[index];
-        const layer = z;
+        // Must match the HUD mini-boards, which show the slice index = layer * 9 + ...
+        const layer = x;
         const isWinningCube = winnerInfo?.line?.includes(index);
         const isHovered = hoveredIndex === index;
         const isEmpty = !value;

@@ -98,6 +98,8 @@ export default function Game({ children }) {
         handleMove,
         winnerInfo,
         activeLayer,
+        playerSymbol,
+        currentTurn: player,
       })}
       <VideoChat roomId={roomId} playersList={playersList} playerSymbol={playerSymbol} />
     </>
