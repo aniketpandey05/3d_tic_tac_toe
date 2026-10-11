@@ -3,7 +3,7 @@ import socket from "../network/socket";
 import GameUI from "./GameUI";
 import VideoChat from "./VideoChat";
 
-export default function Game({ children }) {
+export default function Game({ roomId, children }) {
   const [board, setBoard] = useState(Array(27).fill(null));
   const [player, setPlayer] = useState("X");
   const [winnerInfo, setWinnerInfo] = useState(null);
@@ -13,16 +13,9 @@ export default function Game({ children }) {
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [playersList, setPlayersList] = useState([]);
 
-  const params = new URLSearchParams(window.location.search);
-  const roomId = params.get("room") || "default";
-
-
   useEffect(() => {
-    console.log("Game useEffect running");
-
-    // Attach listeners FIRST
+    // Attach listeners FIRST, then join, so a fast reply can't arrive before anyone is listening
     socket.on("player-assigned", (symbol) => {
-      console.log("Assigned as:", symbol);
       setPlayerSymbol(symbol);
     });
 
@@ -46,8 +39,6 @@ export default function Game({ children }) {
       }
     });
 
-    // THEN emit join-room
-    console.log("Emitting join-room", roomId);
     socket.emit("join-room", { roomId });
 
     return () => {
@@ -64,10 +55,7 @@ export default function Game({ children }) {
     if (board[index] || winnerInfo) return;
     if (player !== playerSymbol) return; // not your turn
 
-    socket.emit("make-move", {
-      roomId,
-      index,
-    }, []);
+    socket.emit("make-move", { roomId, index });
   };
 
 
@@ -101,7 +89,7 @@ export default function Game({ children }) {
         playerSymbol,
         currentTurn: player,
       })}
-      <VideoChat roomId={roomId} playersList={playersList} playerSymbol={playerSymbol} />
+      <VideoChat playersList={playersList} playerSymbol={playerSymbol} />
     </>
   );
 }

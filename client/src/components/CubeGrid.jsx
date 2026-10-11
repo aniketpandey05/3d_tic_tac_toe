@@ -2,6 +2,14 @@ import { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
+// Colors are created once at module load, not on every render of every cell
+const COLOR_X = new THREE.Color("#dcb965");           // rich gold
+const COLOR_O = new THREE.Color("#8a9ab0");           // cool slate blue
+const COLOR_WIN = new THREE.Color("#5fa879");         // emerald green
+const COLOR_EMPTY = new THREE.Color("#2a2622");       // warm charcoal
+const COLOR_EMPTY_HOVER = new THREE.Color("#3d3830"); // lighter warm charcoal
+const COLOR_DIMMED = new THREE.Color("#1a1816");      // deep warm black
+
 export default function CubeGrid({
   board,
   onCellClick,
@@ -78,16 +86,6 @@ function Cell({
   const meshRef = useRef();
   const materialRef = useRef();
 
-  // Colors — Black / White / Beige palette
-  const COLOR_X = new THREE.Color("#dcb965");       // rich gold
-  const COLOR_O = new THREE.Color("#8a9ab0");        // cool slate blue
-  const COLOR_WIN = new THREE.Color("#5fa879");      // emerald green
-  const COLOR_EMPTY = new THREE.Color("#2a2622");    // warm charcoal
-  const COLOR_EMPTY_HOVER = new THREE.Color("#3d3830"); // lighter warm charcoal
-  const COLOR_DIMMED = new THREE.Color("#1a1816");   // deep warm black
-  const COLOR_GHOST_X = new THREE.Color("#dcb965");  // gold ghost
-  const COLOR_GHOST_O = new THREE.Color("#8a9ab0");  // slate ghost
-
   // Show ghost preview for empty cells when it's your turn and you hover
   const showGhost = isEmpty && isHovered && isMyTurn && !isDimmed;
 
@@ -110,7 +108,7 @@ function Cell({
       targetOpacity = 0.3;
     } else if (showGhost) {
       // Ghost preview
-      targetColor = playerSymbol === "X" ? COLOR_GHOST_X : COLOR_GHOST_O;
+      targetColor = playerSymbol === "X" ? COLOR_X : COLOR_O;
       targetEmissive = targetColor;
       targetEmissiveIntensity = 0.15;
       targetOpacity = 0.7;

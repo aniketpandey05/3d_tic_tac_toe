@@ -11,7 +11,8 @@ It is not just a list of files. The goal is to explain:
 
 The highest-value files are:
 
-- `server/index.js`
+- `server/game.js` (the rules)
+- `server/app.js` (the socket server)
 - `client/src/components/Game.jsx`
 - `client/src/components/CubeGrid.jsx`
 - `client/src/components/VideoChat.jsx`
@@ -47,11 +48,19 @@ But the browser is **not** trusted to decide:
 
 That trust boundary is one of the strongest parts of the project.
 
-## 2. `server/index.js`: The Real Brain of the Game
+## 2. The Server: The Real Brain of the Game
 
-This is the most important backend file because it is doing much more than hosting sockets.
+The server is split into three small files, each with one job:
 
-It is responsible for:
+| File | Job |
+|---|---|
+| `server/game.js` | The **rules**. Plain functions with no networking: `createRoom`, `joinRoom`, `applyMove`, `resetGame`, `leaveRoom`. |
+| `server/app.js` | The **messenger**. Listens for socket events, calls the rules, and broadcasts the result. |
+| `server/index.js` | The **on switch**. Reads environment variables and starts listening on a port. |
+
+Keeping the rules separate means they can be tested without starting a server (see `server/test/`).
+
+Together, these files are responsible for:
 
 - creating rooms
 - storing live match state
@@ -64,17 +73,17 @@ It is responsible for:
 
 So even though the frontend looks visually complex, this file is the actual game authority.
 
-### The room state
+### The room state (`createRoom` in `server/game.js`)
 
 ```js
-if (!rooms[roomId]) {
-  rooms[roomId] = {
-    board: Array(27).fill(null),
+export function createRoom() {
+  return {
+    board: Array(BOARD_SIZE).fill(null),
     playerTurn: "X",
-    players: [null, null], // fixed seats: [X, O]
+    players: [null, null], // fixed seats: [X, O], null = empty seat
     spectators: [],
     winner: null,
-    scores: { X: 0, O: 0, draws: 0 }
+    scores: { X: 0, O: 0, draws: 0 },
   };
 }
 ```
@@ -87,7 +96,7 @@ That object contains everything needed to resume and broadcast the current game:
 
 - `board`: the 27-cell cube
 - `playerTurn`: whose move is next
-- `players`: socket ids for the two real players
+- `players`: two fixed seats, `[X's socket id, O's socket id]`, with `null` for an empty seat
 - `spectators`: extra users who can watch but not act
 - `winner`: final result once the game ends
 - `scores`: running totals across resets
@@ -141,37 +150,35 @@ The frontend also keeps a copy in React state, but that copy is only for display
 
 ## 4. The Most Important Security and Correctness Block
 
-This section in `server/index.js` is one of the best examples of good multiplayer logic:
+`applyMove` in `server/game.js` is one of the best examples of good multiplayer logic:
 
 ```js
-socket.on("make-move", ({ roomId, index }) => {
-  const room = rooms[roomId];
-  if (!room) return;
-
-  const playerIndex = room.players.indexOf(socket.id);
-  if (playerIndex === -1) {
-    console.warn(`[SECURITY] Spectator ${socket.id} attempted to make a move.`);
-    return;
+export function applyMove(room, socketId, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= BOARD_SIZE) {
+    return { ok: false, reason: "invalid-index" };
   }
 
-  const symbol = playerIndex === 0 ? "X" : "O";
-
-  if (room.winner) return;
-  if (room.playerTurn !== symbol) return;
-  if (room.board[index]) return;
+  const symbol = getRole(room, socketId);
+  if (symbol === "spectator") return { ok: false, reason: "not-a-player" };
+  if (room.winner) return { ok: false, reason: "game-over" };
+  if (room.playerTurn !== symbol) return { ok: false, reason: "not-your-turn" };
+  if (room.board[index]) return { ok: false, reason: "cell-taken" };
 
   room.board[index] = symbol;
+  // ...then check for a win or draw, or pass the turn
 ```
 
 ### What this code is doing
 
-Before writing a move, the server checks:
+Before writing a move, the server checks (the room's existence is checked in `app.js` first):
 
-1. does the room exist?
+1. is `index` a real cell number from 0 to 26?
 2. is this socket one of the actual players?
 3. has the game already ended?
 4. is it really this player's turn?
 5. is the target cell empty?
+
+Each rejection returns a **reason**, which makes the rules easy to test: the tests check that a spectator's move returns `"not-a-player"`, and so on.
 
 Only after all of those checks does it write the move.
 
@@ -183,6 +190,7 @@ Without this block, users could cheat by:
 - playing twice in a row
 - overwriting existing marks
 - sending fake moves from the browser console
+- sending a made-up cell number like `99` to break the board
 
 This is why server-authoritative logic is such a strong design choice. The frontend helps the user, but the backend enforces the rules.
 
@@ -191,21 +199,23 @@ This is why server-authoritative logic is such a strong design choice. The front
 This code looks small, but it affects the whole app:
 
 ```js
-const playerIndex = room.players.indexOf(socket.id);
-let role = "spectator";
-if (playerIndex === 0) role = "X";
-if (playerIndex === 1) role = "O";
-
-socket.emit("player-assigned", role);
+export function getRole(room, socketId) {
+  const seat = room.players.indexOf(socketId);
+  if (seat === 0) return "X";
+  if (seat === 1) return "O";
+  return "spectator";
+}
 ```
 
 ### What this code is doing
 
-The server checks where the socket id appears in the room's `players` array:
+The server checks which **seat** the socket sits in:
 
-- first player becomes `X`
-- second player becomes `O`
-- everyone else is treated as `spectator`
+- seat 0 is `X`
+- seat 1 is `O`
+- everyone else is a `spectator`
+
+The seats are **fixed**. When a player leaves, their seat becomes `null` instead of being removed. An earlier version removed them from the array, which shifted O into X's seat mid-game and broke the game. Fixed seats mean a player's symbol can never change under them.
 
 ### Why this is important
 
@@ -544,7 +554,7 @@ socket.emit("webrtc-answer", { targetId: senderId, answer });
 socket.emit("webrtc-ice-candidate", { targetId, candidate: event.candidate });
 ```
 
-### Server-side forwarding
+### Server-side forwarding (`server/app.js`)
 
 ```js
 socket.on("webrtc-offer", ({ targetId, offer }) => {
@@ -678,11 +688,10 @@ This project handles that carefully.
 ### Server-side fallback
 
 ```js
-if (!METERED_API_KEY) {
-  return [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ];
+// server/app.js
+if (!apiKey) {
+  log.warn("[TURN] No METERED_API_KEY set — falling back to STUN-only");
+  return STUN_FALLBACK; // public Google STUN servers
 }
 ```
 

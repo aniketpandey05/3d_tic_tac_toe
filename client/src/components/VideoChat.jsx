@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import socket from "../network/socket";
+import useDraggable from "../hooks/useDraggable";
 import "./VideoChat.css";
 
 // ─── Fallback ICE config (STUN only) ─
@@ -12,77 +13,12 @@ const FALLBACK_ICE_SERVERS = [
 const MAX_RETRIES = 2;
 const ICE_TIMEOUT_MS = 15000;
 
-export default function VideoChat({ roomId, playersList = [], playerSymbol }) {
-  const localVideoRef = useRef(null);
+export default function VideoChat({ playersList = [], playerSymbol }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [localStream, setLocalStream] = useState(null);
 
-  // Drag and Drop Panel State & Handlers
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const dragRef = useRef({ isDragging: false, startX: 0, startY: 0, posX: 0, posY: 0 });
-
-  const handleMouseMove = useCallback((e) => {
-    if (!dragRef.current.isDragging) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-    setPosition({
-      x: dragRef.current.posX + dx,
-      y: dragRef.current.posY + dy,
-    });
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    dragRef.current.isDragging = false;
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", handleMouseUp);
-    document.body.style.cursor = "default";
-  }, [handleMouseMove]);
-
-  const handleMouseDown = useCallback((e) => {
-    if (e.target.closest("button")) return;
-    dragRef.current.isDragging = true;
-    dragRef.current.startX = e.clientX;
-    dragRef.current.startY = e.clientY;
-    dragRef.current.posX = position.x;
-    dragRef.current.posY = position.y;
-    
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    document.body.style.cursor = "grabbing";
-    e.preventDefault();
-  }, [position, handleMouseMove, handleMouseUp]);
-
-  const handleTouchMove = useCallback((e) => {
-    if (!dragRef.current.isDragging) return;
-    const touch = e.touches[0];
-    const dx = touch.clientX - dragRef.current.startX;
-    const dy = touch.clientY - dragRef.current.startY;
-    if (e.cancelable) e.preventDefault();
-    setPosition({
-      x: dragRef.current.posX + dx,
-      y: dragRef.current.posY + dy,
-    });
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    dragRef.current.isDragging = false;
-    document.removeEventListener("touchmove", handleTouchMove);
-    document.removeEventListener("touchend", handleTouchEnd);
-  }, [handleTouchMove]);
-
-  const handleTouchStart = useCallback((e) => {
-    if (e.target.closest("button")) return;
-    const touch = e.touches[0];
-    dragRef.current.isDragging = true;
-    dragRef.current.startX = touch.clientX;
-    dragRef.current.startY = touch.clientY;
-    dragRef.current.posX = position.x;
-    dragRef.current.posY = position.y;
-    
-    document.addEventListener("touchmove", handleTouchMove, { passive: false });
-    document.addEventListener("touchend", handleTouchEnd);
-  }, [position, handleTouchMove, handleTouchEnd]);
+  const { position, dragHandlers } = useDraggable();
 
   // Mesh Network State
   const localStreamRef = useRef(null);
@@ -267,7 +203,11 @@ export default function VideoChat({ roomId, playersList = [], playerSymbol }) {
     }
   }, [getPeerObj]);
 
-  createOfferRef.current = createOffer;
+  // The retry code inside getPeerObj needs createOffer, but createOffer is defined after it.
+  // Keeping the latest createOffer in a ref lets the retry call it later without a circular dependency.
+  useEffect(() => {
+    createOfferRef.current = createOffer;
+  }, [createOffer]);
 
   useEffect(() => {
     async function drainIceCandidateQueue(targetId) {
@@ -413,10 +353,12 @@ export default function VideoChat({ roomId, playersList = [], playerSymbol }) {
 
     init();
 
+    const peers = peersRef.current;
+
     return () => {
       Object.keys(listeners).forEach(event => socket.off(event));
-      peersRef.current.forEach(obj => obj.peer.close());
-      peersRef.current.clear();
+      peers.forEach(obj => obj.peer.close());
+      peers.clear();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
     };
   }, [getPeerObj, createOffer, removePeer]);
@@ -460,8 +402,7 @@ export default function VideoChat({ roomId, playersList = [], playerSymbol }) {
       <div
         className={`video-chat__panel count-${mainStreams.length}`}
         style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
+        {...dragHandlers}
       >
         {/* Video Container (Dynamic Player Grid) */}
         <div className={`video-chat__video-container count-${mainStreams.length}`}>
